@@ -10,27 +10,91 @@ pipeline {
         maven 'maven'
     }
     stages {
-        stage('chk Java version') {
-            steps {
-                echo 'checking java version'
-                sh 'java --version'
-				echo 'java version is'
-            }
-        }
-        stage('Code Compile') {
+        stage('Code Compilation') {
             steps {
                 echo 'code compilation is starting'
                 sh 'mvn clean compile'
 				echo 'code compilation is completed'
             }
         }
-        stage('Code package') {
+
+
+		stage('Sonarqube'){
+		    environment{
+			    scannerHome = tool 'qube'
+		    }
+			steps {
+			    withSonarQubeEnv('sonar-server'){
+				   sh "${scannerHome}/bin/sonar-scanner"
+                   sh 'mvn sonar:sonar'
+                }
+                timeout(time: 10, unit: 'MINUTES'){
+                    waitForQualityGate abortPipeline: true
+                }
+			}
+        }
+
+
+        stage('Code Package') {
             steps {
-                echo 'code packaging is starting'
+                echo 'code packing is starting'
                 sh 'mvn clean package'
-				echo 'code packaging is completed'
+				echo 'code packing is completed'
             }
         }
 
-    }
-}
+
+        stage('Building & Tag Docker Image') {
+            steps {
+                echo 'Starting Building Docker Image'
+                sh 'docker build -t kulkarnisakshi/makemytrip-ms .'
+                sh 'docker build -t makemytrip-ms .'
+                echo 'Completed  Building Docker Image'
+            }
+        }
+
+
+        stage('Docker Image Scanning') {
+            steps {
+                echo 'Docker Image Scanning Started'
+                sh 'java -version'
+                echo 'Docker Image Scanning Started'
+            }
+        }
+
+
+        stage(' Docker push to Docker Hub') {
+           steps {
+              script {
+                 withCredentials([string(credentialsId: 'dockerhubCred', variable: 'dockerhubCred')]){
+                 sh 'docker login docker.io -u kulkarnisakshi -p ${dockerhubCred}'
+                 echo "Push Docker Image to DockerHub : In Progress"
+                 sh 'docker push kulkarnisakshi/makemytrip-ms:latest'
+                 echo "Push Docker Image to DockerHub : In Progress"
+                 sh 'whoami'
+                 }
+              }
+            }
+        }
+
+
+        stage(' Docker Image Push to Amazon ECR') {
+           steps {
+              script {
+                 withDockerRegistry([credentialsId:'ecr:ap-south-1:ecr-credentials', url:"https://559220132560.dkr.ecr.ap-south-1.amazonaws.com"]){
+                 sh """
+                 echo "List the docker images present in local"
+                 docker images
+                 echo "Tagging the Docker Image: In Progress"
+                 docker tag makemytrip-ms:latest 559220132560.dkr.ecr.ap-south-1.amazonaws.com/MakeMyTrip-ms:latest
+                 echo "Tagging the Docker Image: Completed"
+                 echo "Push Docker Image to ECR : In Progress"
+                 docker push 559220132560.dkr.ecr.ap-south-1.amazonaws.com/makemytrip-ms:latest
+                 echo "Push Docker Image to ECR : Completed"
+                 """
+                }
+            }
+           }
+        }
+
+
